@@ -1,0 +1,1223 @@
+<html>
+
+  <head>
+    <title>WebGL Lesson 8 - Texture as background</title>
+    <meta http-equiv="content-type" content="text/html; charset=UTF-8">
+
+    <script type="text/javascript" src="../GLjs/glMatrix-0.9.5.min.js"></script>
+    <script type="text/javascript" src="../GLjs/webgl-utils.js"></script>
+
+    <script id="shader-fs" type="x-shader/x-fragment">
+      precision mediump float;
+
+      varying vec3 vTextureCoord;
+	  varying vec3 vCubeCoord;
+    varying vec4 vColor;
+
+
+
+      uniform sampler2D uSampler;
+	  uniform samplerCube uSamplerCube;
+	  uniform bool isInfinity;
+      void main(void) {
+        if(isInfinity){
+			gl_FragColor = textureCube(uSamplerCube, vCubeCoord.stp);
+		}else{
+			gl_FragColor = texture2D(uSampler, vTextureCoord.st);
+		}
+      }
+    </script>
+
+    <script id="shader-vs" type="x-shader/x-vertex">
+      attribute vec3 aVertexPosition;
+      attribute vec3 aTextureCoord;
+      attribute vec4 aVertexColor;
+
+      uniform mat4 uViewMatrix;
+      uniform mat4 uModelMatrix;
+      uniform mat4 uProjectionMatrix;
+      uniform mat4 uViewMatrixInv;
+      uniform mat3 uNormalMatrix;
+
+      uniform bool isInfinity;
+      uniform vec3 comera_position;
+
+	    varying vec3 vTextureCoord;
+      varying vec3 vCubeCoord;
+      varying vec4 vColor;
+
+
+      void main(void) {
+		mat4 lModelViewMatrix = uViewMatrix * uModelMatrix;
+
+        gl_Position = uProjectionMatrix * uViewMatrix * uModelMatrix * vec4(aVertexPosition, 1.0);
+        vColor = aVertexColor;
+        vTextureCoord = aTextureCoord;
+        
+		if(isInfinity){
+			vec3 focusVec = vec4(normalize((uViewMatrixInv * (
+				//計算攝影機到點的向量
+				(lModelViewMatrix * vec4(aVertexPosition, 1.0))-vec4(comera_position, 1.0)
+			)).xyz
+			), 1.0).xyz;
+
+			vCubeCoord.stp = vec3(-focusVec.xy, focusVec.z);
+		}
+      }
+    </script>
+
+
+    <script type="text/javascript">
+
+      var gl;
+
+      function initGL(canvas) {
+        try {
+          gl = canvas.getContext("experimental-webgl");
+          gl.viewportWidth = canvas.width;
+          gl.viewportHeight = canvas.height;
+        } catch (e) {
+        }
+        if (!gl) {
+          alert("Could not initialise WebGL, sorry :-(");
+        }
+		  //若不提供uniform boolean傳遞，則用uniform1i代替
+		  if(typeof gl.uniform1b !== 'function')
+		  gl.uniform1b = function(binding_data, bool_val){
+			gl.uniform1i(binding_data, !bool_val ? 0 : 1);
+		  };
+      }
+
+
+      function getShader(gl, id) {
+        var shaderScript = document.getElementById(id);
+        if (!shaderScript) {
+          return null;
+        }
+
+        var str = "";
+        var k = shaderScript.firstChild;
+        while (k) {
+          if (k.nodeType == 3) {
+            str += k.textContent;
+          }
+          k = k.nextSibling;
+        }
+
+        var shader;
+        if (shaderScript.type == "x-shader/x-fragment") {
+          shader = gl.createShader(gl.FRAGMENT_SHADER);
+        } else if (shaderScript.type == "x-shader/x-vertex") {
+          shader = gl.createShader(gl.VERTEX_SHADER);
+        } else {
+          return null;
+        }
+
+        gl.shaderSource(shader, str);
+        gl.compileShader(shader);
+
+        if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+          alert(gl.getShaderInfoLog(shader));
+          return null;
+        }
+
+        return shader;
+      }
+
+
+      var shaderProgram;
+
+      function initShaders() {
+        var fragmentShader = getShader(gl, "shader-fs");
+        var vertexShader = getShader(gl, "shader-vs");
+
+        shaderProgram = gl.createProgram();
+        gl.attachShader(shaderProgram, vertexShader);
+        gl.attachShader(shaderProgram, fragmentShader);
+        gl.linkProgram(shaderProgram);
+
+        if (!gl.getProgramParameter(shaderProgram, gl.LINK_STATUS)) {
+          alert("Could not initialise shaders");
+        }
+
+        gl.useProgram(shaderProgram);
+
+        shaderProgram.vertexPositionAttribute = gl.getAttribLocation(shaderProgram, "aVertexPosition");
+        gl.enableVertexAttribArray(shaderProgram.vertexPositionAttribute);
+
+        shaderProgram.vertexColorAttribute = gl.getAttribLocation(shaderProgram, "aVertexColor");
+      gl.enableVertexAttribArray(shaderProgram.vertexColorAttribute);
+
+
+        shaderProgram.textureCoordAttribute = gl.getAttribLocation(shaderProgram, "aTextureCoord");
+        gl.enableVertexAttribArray(shaderProgram.textureCoordAttribute);
+
+		//變換矩陣
+		  shaderProgram.projectionMatrixUniform =
+			gl.getUniformLocation(shaderProgram, "uProjectionMatrix");
+		  shaderProgram.viewMatrixUniform =
+			gl.getUniformLocation(shaderProgram, "uViewMatrix");
+		  shaderProgram.modelMatrixUniform =
+			gl.getUniformLocation(shaderProgram, "uModelMatrix");
+		  shaderProgram.normalMatrixUniform =
+			gl.getUniformLocation(shaderProgram, "uNormalMatrix");
+		  shaderProgram.inverseViewMatrixUniform =
+			gl.getUniformLocation(shaderProgram, "uViewMatrixInv");
+
+		shaderProgram.isInfinityUniform =
+			gl.getUniformLocation(shaderProgram, "isInfinity");
+		shaderProgram.comeraPositionUniform =
+			gl.getUniformLocation(shaderProgram, "comera_position");
+
+		//Texture貼圖取樣
+      shaderProgram.samplerUniform =
+        gl.getUniformLocation(shaderProgram, "uSampler");
+      shaderProgram.samplerCubeUniform =
+        gl.getUniformLocation(shaderProgram, "uSamplerCube");
+      }
+
+
+      function handleLoadedTexture(texture) {
+        gl.bindTexture(gl.TEXTURE_2D, texture); //綁定紋理到 gl.TEXTURE_2D
+        //gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true); // 所有被載入紋理圖片需要做垂直翻轉
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, texture.image);
+        //影像類型、細節層級、顯示卡儲存影像的格式、影像各種通道的大小(也就是儲存於 R、G、B 之資料類型)、影像本身
+
+        //NEAREST使用原始影像的原樣去進行紋理特殊縮放
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST); //放大紋理
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST); //縮小紋理
+        gl.bindTexture(gl.TEXTURE_2D, null);  //將當前紋理設置為null
+      }
+
+		function handleLoadedCubeMap(texture){
+			gl.bindTexture(gl.TEXTURE_CUBE_MAP, texture);
+			gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+			//put images on cubemap
+			gl.texImage2D(gl.TEXTURE_CUBE_MAP_POSITIVE_Z ,0,gl.RGB,gl.RGB,gl.UNSIGNED_BYTE, texture.image[0]);
+			gl.texImage2D(gl.TEXTURE_CUBE_MAP_NEGATIVE_Y ,0,gl.RGB,gl.RGB,gl.UNSIGNED_BYTE, texture.image[1]);
+			gl.texImage2D(gl.TEXTURE_CUBE_MAP_NEGATIVE_Z ,0,gl.RGB,gl.RGB,gl.UNSIGNED_BYTE, texture.image[2]);
+			gl.texImage2D(gl.TEXTURE_CUBE_MAP_POSITIVE_X ,0,gl.RGB,gl.RGB,gl.UNSIGNED_BYTE, texture.image[3]);
+			gl.texImage2D(gl.TEXTURE_CUBE_MAP_NEGATIVE_X ,0,gl.RGB,gl.RGB,gl.UNSIGNED_BYTE, texture.image[4]);
+			gl.texImage2D(gl.TEXTURE_CUBE_MAP_POSITIVE_Y ,0,gl.RGB,gl.RGB,gl.UNSIGNED_BYTE, texture.image[5]);
+
+			gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_MIN_FILTER,gl.NEAREST);
+
+			gl.bindTexture(gl.TEXTURE_2D, null);
+		}
+
+
+		    function loadTexture(file_name) {
+			  var tes_buf = gl.createTexture(); //建立紋理物件並傳送給iglTexture
+			  tes_buf.image = new Image();
+			  tes_buf.image.onload = function () {  //回呼函式(callback function)
+				handleLoadedTexture(tes_buf);
+			  }
+
+			  tes_buf.image.src = file_name;
+			  return tes_buf;
+			}
+			function loadCubeMap(file_name) {
+			  var tes_buf = gl.createTexture();
+			  var faces = ["front", "top", "back", "right", "left", "bottom"];
+			  var ss = file_name.split('.');
+			  var file_name_postfix = '.' + ss[ss.length-1];
+			  var file_prefix = ss[0];
+			  for(var j=1; j<ss.length-1; ++j)file_prefix += ss[j];
+			  tes_buf.image = [];
+			  var i=0;
+			  var call_back_loop = function(){
+				tes_buf.image[i] = new Image();
+				if(i+1 >= faces.length){
+				  tes_buf.image[i].onload = function () {  //回呼函式(callback function)
+					handleLoadedCubeMap(tes_buf);
+				  };
+				}else{
+				  tes_buf.image[i].onload = call_back_loop;
+				}
+				tes_buf.image[i].src = file_prefix + faces[i] + file_name_postfix;
+				//console.log(tes_buf.image);
+				++i;
+			  }
+			  call_back_loop();
+			  return tes_buf;
+			}
+
+
+      var iglTexture;  //建立全域變數來儲存紋理
+		var ntouTexture;
+      
+    var sunTexture;
+    var earthTexture;
+    var moonTexture;
+    var cloudTexture;
+    var marstexture;
+    var ntouTexture;
+    var saturnTexture;
+    var ringTexture;
+
+      function initTexture() {
+        iglTexture = loadTexture("image/igl.gif"); //建立紋理物件並傳送給iglTexture
+		ntouTexture = loadCubeMap("desert/.jpg");
+
+    sunTexture = gl.createTexture();
+          sunTexture.image = new Image();
+          sunTexture.image.onload = function () {
+            handleLoadedTexture(sunTexture)
+
+            ntouTexture = loadCubeMap("desert/.jpg");
+          }
+
+          sunTexture.image.src = "sun.png";
+
+          earthTexture = gl.createTexture();
+          earthTexture.image = new Image();
+          earthTexture.image.onload = function () {
+            handleLoadedTexture(earthTexture)
+          }
+
+          earthTexture.image.src = "earth.png";
+
+
+          moonTexture = gl.createTexture();
+          moonTexture.image = new Image();
+          moonTexture.image.onload = function () {
+            handleLoadedTexture(moonTexture)
+          }
+
+          moonTexture.image.src = "moon.png";
+
+          cloudTexture = gl.createTexture();
+          cloudTexture.image = new Image();
+          cloudTexture.image.onload = function () {
+            handleLoadedTexture(cloudTexture)
+          }
+
+          cloudTexture.image.src = "cloud.png";
+
+
+          marstexture = gl.createTexture();
+          marstexture.image = new Image();
+          marstexture.image.onload = function () {
+            handleLoadedTexture(marstexture)
+          }
+
+          marstexture.image.src = "mars.png";
+
+          saturnTexture = gl.createTexture();
+          saturnTexture.image = new Image();
+          saturnTexture.image.onload = function () {
+            handleLoadedTexture(saturnTexture)
+          }
+
+          saturnTexture.image.src = "saturn.jpg";
+
+          ringTexture = gl.createTexture();
+          ringTexture.image = new Image();
+          ringTexture.image.onload = function () {
+            handleLoadedTexture(ringTexture)
+          }
+
+          ringTexture.image.src = "saturn-rings.png";
+
+      }
+
+
+    var TopMatrix;
+    var matrix_modes = ["view", "model", "projection", "texture", "color"];
+    //定義特殊矩陣
+    var special_matrix_modes = {
+      "modelview":{
+        "get_matrix":function(){
+          var result = mat4.create();
+          mat4.multiply(TopMatrix("view"), TopMatrix("model"), result);
+          return result;
+        }
+      },
+      "modelviewprojection":{
+        "get_matrix":function(){
+          var result = mat4.create();
+          mat4.multiply(TopMatrix("projection"), TopMatrix("modelview"), result);
+          return result;
+        }
+      },
+      "normal":{
+        "get_matrix":function(){
+          var normalMatrix = mat3.create();
+          mat4.toInverseMat3(TopMatrix("modelview"), normalMatrix);
+          mat3.transpose(normalMatrix);
+          return normalMatrix;
+        }
+      },
+      "inverseview":{
+        "get_matrix":function(){
+          var result = mat4.create();
+          mat4.inverse(TopMatrix("view"), result);
+          return result;
+        }
+      },
+      "identity":{
+        "get_matrix":function(){
+          var result = mat4.create();
+          mat4.identity(result);
+          return result;
+        }
+      }
+    };
+    var Matries = [];
+
+    function initMatrix(){
+      //依序初始化所有矩陣堆疊
+      for(var i=0; i<matrix_modes.length; ++i){
+        Matries[matrix_modes[i]] = [mat4.create()];
+      }
+    }
+    TopMatrix = function(matrix_mode) {
+      if(special_matrix_modes[matrix_mode] &&
+        typeof special_matrix_modes[matrix_mode].get_matrix === "function"){
+          return special_matrix_modes[matrix_mode].get_matrix();
+      }
+        //只作用在矩陣堆疊的頂層
+      return Matries[matrix_mode][Matries[matrix_mode].length-1];
+    }
+    function PushMatrix(matrix_mode) {
+      //建立一個零矩陣來準備儲存矩陣
+      var copy = mat4.create();
+      //將堆疊頂層的矩陣複製一份
+      mat4.set(TopMatrix(matrix_mode), copy);
+      //再放進堆疊
+      Matries[matrix_mode].push(copy);
+    }
+
+    function PopMatrix(matrix_mode) {
+      if (Matries[matrix_mode].length == 0) {
+        throw "Invalid popMatrix!";
+      }
+      Matries[matrix_mode].pop();
+    }
+
+    function setMatrixUniforms() {
+      gl.uniformMatrix4fv(shaderProgram.projectionMatrixUniform, false, TopMatrix("projection"));
+      gl.uniformMatrix4fv(shaderProgram.viewMatrixUniform, false, TopMatrix("view"));
+      gl.uniformMatrix4fv(shaderProgram.modelMatrixUniform, false, TopMatrix("model"));
+      gl.uniformMatrix3fv(shaderProgram.normalMatrixUniform, false, TopMatrix("normal"));
+      //尚未用到的矩陣
+      //gl.uniformMatrix4fv(shaderProgram.colorMatrixUniform, false, TopMatrix("color"));
+      //gl.uniformMatrix4fv(shaderProgram.textureMatrixUniform, false, TopMatrix("texture"));
+    }
+
+
+      function degToRad(degrees) {
+        return degrees * Math.PI / 180;
+      }
+
+      var cubeVertexPositionBuffer;
+      var cubeVertexTextureCoordBuffer;
+      var cubeVertexIndexBuffer;
+		  var cubeMapTextureCoordBuffer;
+
+      
+    var sphereVertexPositionBuffer;
+    var sphereVertexColorBuffer;
+    var sphereVertexIndexBuffer;
+	  var sphereVertexTextureCoordBuffer;
+
+
+
+
+
+
+
+
+	  var farfaceNormalBuffer;
+		function updateFarFaceNormal(vertexNormals){
+		  gl.bindBuffer(gl.ARRAY_BUFFER, farfaceNormalBuffer);
+		  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertexNormals), gl.STATIC_DRAW);
+		  farfaceNormalBuffer.itemSize = 3;
+		  farfaceNormalBuffer.numItems = 4;
+		}
+
+      function initBuffers() {
+        //--畫球體
+        var latitudeBands = 30;
+        var longitudeBands = 30;
+        var radius = 2;
+
+        var vertexPositionData = [];
+        var sphereColorData = [];
+		    var sphereuvdata = [];
+        var ringPositionData = [];
+        var ringColorData = [];
+        var ringTexcoordData = [];
+        var ringIndexData = [];
+
+		var i=0;
+        for (var latNumber=0; latNumber <= latitudeBands; latNumber++) {
+            var theta = latNumber * Math.PI / latitudeBands;
+            var sinTheta = Math.sin(theta);
+            var cosTheta = Math.cos(theta);
+
+            for (var longNumber=0; longNumber <= longitudeBands; longNumber++) {
+                var phi = longNumber * 2 * Math.PI / longitudeBands;
+                var sinPhi = Math.sin(phi);
+                var cosPhi = Math.cos(phi);
+
+                var x = cosPhi * sinTheta;
+                var y = cosTheta;
+                var z = sinPhi * sinTheta;
+                var u = 1-(longNumber / longitudeBands);
+                var v = 1-(latNumber / latitudeBands);
+
+                sphereColorData.push(u);
+                sphereColorData.push(v);
+				sphereColorData.push((i++)/(latitudeBands*longitudeBands));
+				sphereColorData.push(1.0);
+
+
+				sphereuvdata.push(u);
+				sphereuvdata.push(v);
+				sphereuvdata.push((i++)/(latitudeBands*longitudeBands));
+
+                vertexPositionData.push(radius * x);
+                vertexPositionData.push(radius * y);
+                vertexPositionData.push(radius * z);
+
+                if(latNumber==0){
+                  ringColorData.push(1.0);
+                  ringColorData.push(1.0);
+                  ringColorData.push(1.0);
+                  ringColorData.push(1.0);
+
+                  ringTexcoordData.push(u);
+                  ringTexcoordData.push(v);
+
+                  ringPositionData.push(radius * x * 0.5);
+                  ringPositionData.push(radius * y * 0.5);
+                  ringPositionData.push(radius * z * 0.5);
+                  ringPositionData.push(1.0);
+                }
+                else if(latNumber==1){
+                  ringColorData.push(1.0);
+                  ringColorData.push(1.0);
+                  ringColorData.push(1.0);
+                  ringColorData.push(1.0);
+
+                  ringTexcoordData.push(u);
+                  ringTexcoordData.push(v);
+
+                  ringPositionData.push(radius * x);
+                  ringPositionData.push(radius * y);
+                  ringPositionData.push(radius * z);
+                  ringPositionData.push(1.0);
+                }
+            }
+        }
+
+        var indexData = [];
+        for (var latNumber=0; latNumber < latitudeBands; latNumber++) {
+            for (var longNumber=0; longNumber < longitudeBands; longNumber++) {
+                var first = (latNumber * (longitudeBands + 1)) + longNumber;
+                var second = first + longitudeBands + 1;
+                indexData.push(first);
+                indexData.push(second);
+                indexData.push(first + 1);
+
+                indexData.push(second);
+                indexData.push(second + 1);
+                indexData.push(first + 1);
+                if(latNumber==0){
+                  first = longNumber;
+                  second = first + longitudeBands + 1;
+                  ringIndexData.push(first);
+                  ringIndexData.push(second);
+                  ringIndexData.push(first + 1);
+
+                  ringIndexData.push(second);
+                  ringIndexData.push(second + 1);
+                  ringIndexData.push(first + 1);
+                }
+            }
+        }
+
+        sphereVertexColorBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, sphereVertexColorBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(sphereColorData), gl.STATIC_DRAW);
+        sphereVertexColorBuffer.itemSize = 4;
+        sphereVertexColorBuffer.numItems = sphereColorData.length / 4;
+
+		    sphereVertexTextureCoordBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, sphereVertexTextureCoordBuffer);
+	    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(sphereuvdata), gl.STATIC_DRAW);
+        sphereVertexTextureCoordBuffer.itemSize = 3;
+        sphereVertexTextureCoordBuffer.numItems = sphereuvdata.length / 3;
+
+        sphereVertexPositionBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, sphereVertexPositionBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertexPositionData), gl.STATIC_DRAW);
+        sphereVertexPositionBuffer.itemSize = 3;
+        sphereVertexPositionBuffer.numItems = vertexPositionData.length / 3;
+
+        sphereVertexIndexBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, sphereVertexIndexBuffer);
+        gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(indexData), gl.STATIC_DRAW);
+        sphereVertexIndexBuffer.itemSize = 1;
+        sphereVertexIndexBuffer.numItems = indexData.length;
+
+
+        //----------------------------------------
+        cubeVertexPositionBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, cubeVertexPositionBuffer);
+        vertices = [
+          // Front face
+          -1.0, -1.0,  1.0,
+          1.0, -1.0,  1.0,
+          1.0,  1.0,  1.0,
+          -1.0,  1.0,  1.0,
+
+          // Back face
+          -1.0, -1.0, -1.0,
+          -1.0,  1.0, -1.0,
+          1.0,  1.0, -1.0,
+          1.0, -1.0, -1.0,
+
+          // Top face
+          -1.0,  1.0, -1.0,
+          -1.0,  1.0,  1.0,
+          1.0,  1.0,  1.0,
+          1.0,  1.0, -1.0,
+
+          // Bottom face
+          -1.0, -1.0, -1.0,
+          1.0, -1.0, -1.0,
+          1.0, -1.0,  1.0,
+          -1.0, -1.0,  1.0,
+
+          // Right face
+          1.0, -1.0, -1.0,
+          1.0,  1.0, -1.0,
+          1.0,  1.0,  1.0,
+          1.0, -1.0,  1.0,
+
+          // Left face
+          -1.0, -1.0, -1.0,
+          -1.0, -1.0,  1.0,
+          -1.0,  1.0,  1.0,
+          -1.0,  1.0, -1.0,
+        ];
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.STATIC_DRAW);
+        cubeVertexPositionBuffer.itemSize = 3;
+        cubeVertexPositionBuffer.numItems = 24;
+
+      cubeMapTextureCoordBuffer = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, cubeMapTextureCoordBuffer); //建立一個紋理座標緩衝器
+      var textureCoords = [
+        //s, t, p
+        1.0, -1.0, -1.0,
+        1.0,  1.0, -1.0,
+        1.0,  1.0,  1.0,
+        1.0, -1.0,  1.0,
+
+        -1.0, -1.0, -1.0,
+        -1.0, -1.0,  1.0,
+        -1.0,  1.0,  1.0,
+        -1.0,  1.0, -1.0,
+
+        -1.0, -1.0,  1.0,
+        1.0, -1.0,  1.0,
+        1.0,  1.0,  1.0,
+        -1.0,  1.0,  1.0,
+
+        -1.0, -1.0, -1.0,
+        -1.0,  1.0, -1.0,
+        1.0,  1.0, -1.0,
+        1.0, -1.0, -1.0,
+
+        -1.0, -1.0, -1.0,
+        1.0, -1.0, -1.0,
+        1.0, -1.0,  1.0,
+        -1.0, -1.0,  1.0,
+
+        -1.0,  1.0, -1.0,
+        -1.0,  1.0,  1.0,
+        1.0,  1.0,  1.0,
+        1.0,  1.0, -1.0,
+
+      ];
+      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(textureCoords), gl.STATIC_DRAW);
+      cubeMapTextureCoordBuffer.itemSize = 3; //(s, t, p)
+      cubeMapTextureCoordBuffer.numItems = 24;
+//
+      cubeVertexTextureCoordBuffer  = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, cubeVertexTextureCoordBuffer); //建立一個紋理座標緩衝器
+      textureCoords = [   //紋理座標指定笛卡爾x,y座標系中，把紋理的寬跟高都看成 1.0
+        //s, t, p
+        // Front face
+        0.0, 0.0, 0.0,
+        1.0, 0.0, 0.0,
+        1.0, 1.0, 0.0,
+        0.0, 1.0, 0.0,
+
+        // Back face
+        1.0, 0.0, 0.0,
+        1.0, 1.0, 0.0,
+        0.0, 1.0, 0.0,
+        0.0, 0.0, 0.0,
+
+        // Top face
+        0.0, 1.0, 0.0,
+        0.0, 0.0, 0.0,
+        1.0, 0.0, 0.0,
+        1.0, 1.0, 0.0,
+
+        // Bottom face
+        1.0, 1.0, 0.0,
+        0.0, 1.0, 0.0,
+        0.0, 0.0, 0.0,
+        1.0, 0.0, 0.0,
+
+        // Right face
+        1.0, 0.0, 0.0,
+        1.0, 1.0, 0.0,
+        0.0, 1.0, 0.0,
+        0.0, 0.0, 0.0,
+
+        // Left face
+        0.0, 0.0, 0.0,
+        1.0, 0.0, 0.0,
+        1.0, 1.0, 0.0,
+        0.0, 1.0, 0.0
+      ];
+      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(textureCoords), gl.STATIC_DRAW);
+      cubeVertexTextureCoordBuffer.itemSize = 3; //(s, t, p)
+      cubeVertexTextureCoordBuffer.numItems = 24;
+
+        cubeVertexIndexBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, cubeVertexIndexBuffer);
+        var cubeVertexIndices = [
+          0, 1, 2,      0, 2, 3,    // Front face
+          4, 5, 6,      4, 6, 7,    // Back face
+          8, 9, 10,     8, 10, 11,  // Top face
+          12, 13, 14,   12, 14, 15, // Bottom face
+          16, 17, 18,   16, 18, 19, // Right face
+          20, 21, 22,   20, 22, 23  // Left face
+        ];
+        gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(cubeVertexIndices), gl.STATIC_DRAW);
+        cubeVertexIndexBuffer.itemSize = 1;
+        cubeVertexIndexBuffer.numItems = 36;
+
+		  farfaceNormalBuffer = gl.createBuffer();
+		  updateFarFaceNormal([
+			// Front face
+			0.0,  0.0,  1.0,
+			0.0,  0.0,  1.0,
+			0.0,  0.0,  1.0,
+			0.0,  0.0,  1.0,
+		  ]);
+        
+      ringVertexColorBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, ringVertexColorBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(ringColorData), gl.STATIC_DRAW);
+        ringVertexColorBuffer.itemSize = 4;
+        ringVertexColorBuffer.numItems = ringColorData.length / 4;
+
+        ringVertexPositionBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, ringVertexPositionBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(ringPositionData), gl.STATIC_DRAW);
+        ringVertexPositionBuffer.itemSize = 4;
+        ringVertexPositionBuffer.numItems = ringPositionData.length / 4;
+
+		ringVertexTexcoordBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, ringVertexTexcoordBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(ringTexcoordData), gl.STATIC_DRAW);
+        ringVertexTexcoordBuffer.itemSize = 2;
+        ringVertexTexcoordBuffer.numItems = ringTexcoordData.length / 2;
+
+        ringVertexIndexBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ringVertexIndexBuffer);
+        gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(ringIndexData), gl.STATIC_DRAW);
+        ringVertexIndexBuffer.itemSize = 1;
+        ringVertexIndexBuffer.numItems = ringIndexData.length;
+
+        initMatrix();
+      }
+
+      var xRot = 0;
+      var yRot = 0;
+      var zRot = 0;
+
+    var viewHead = 0;
+    var viewRoll = 0;
+    var viewEpitch = 0;
+    var viewUppos = 0;
+    var viewRight = 0;
+    var viewZoom = 0;
+    var currentlyPressedKeys = {};
+    var follow_pig = false;
+    function handleKeyDown(event) {
+        currentlyPressedKeys[event.keyCode] = true;   //一個空物件類型
+
+
+    }
+
+
+    function handleKeyUp(event) {
+        currentlyPressedKeys[event.keyCode] = false;
+
+        if (event.keyCode == 32) follow_pig = !follow_pig; //空白
+
+        if(follow_pig){
+           viewHead = 0;
+           viewRoll = 0;
+           viewEpitch = 0;
+           viewUppos = 0;
+           viewRight = 0;
+           viewZoom = 0;
+        }
+    }
+
+
+    function handleKeys() {
+
+		if (currentlyPressedKeys[83]) viewZoom -= 0.5; //w
+  		if (currentlyPressedKeys[87]) viewZoom += 0.5; //s
+		if (currentlyPressedKeys[65]) viewRight += 0.5; //a
+  		if (currentlyPressedKeys[68]) viewRight -= 0.5; //d
+		if (currentlyPressedKeys[90]) viewUppos += 0.5; //z
+  		if (currentlyPressedKeys[88]) viewUppos -= 0.5; //x
+
+  		if (currentlyPressedKeys[82]) viewEpitch += 0.5; //r
+  		if (currentlyPressedKeys[70]) viewEpitch -= 0.5; //f
+  		if (currentlyPressedKeys[84]) viewHead += 0.5; //t
+  		if (currentlyPressedKeys[71]) viewHead -= 0.5; //g
+  		if (currentlyPressedKeys[89]) viewRoll += 0.5; //y
+  		if (currentlyPressedKeys[72]) viewRoll -= 0.5; //h
+
+
+		//
+    }
+
+    var rPyramid = 0;
+    var rCube = 0;
+    var switchCamera = false;
+
+      function drawScene() {
+        gl.viewport(0, 0, gl.viewportWidth, gl.viewportHeight);
+        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+        //set projection
+
+      var aspect = gl.viewportWidth / gl.viewportHeight;
+      var fovy = 45.0;
+      var zNear = 1;
+      var zFar = 1000.0;
+	  mat4.identity(TopMatrix("projection"));
+      mat4.perspective(fovy, aspect, zNear, zFar, TopMatrix("projection"));
+
+        //set camera
+
+		mat4.identity(TopMatrix("view"));
+		var lookAtMatrix = mat4.create(TopMatrix("view"));
+		var camera_position = [0.0, 2.0, -7.0];
+   
+		mat4.lookAt(camera_position, [0.0, 0.0, 5.0], [0.0, 1.0, 0.0], lookAtMatrix);
+
+		  mat4.rotate(TopMatrix("view"), degToRad(viewHead), [0.0, 1.0, 0.0]);
+		  mat4.rotate(TopMatrix("view"), degToRad(viewRoll), [0.0, 0.0, 1.0]);
+		  mat4.rotate(TopMatrix("view"), degToRad(viewEpitch), [1.0, 0.0, 0.0]);
+
+		  mat4.multiply(TopMatrix("view"), lookAtMatrix , TopMatrix("view"));
+
+		  mat4.translate(TopMatrix("view"), [0.0, viewUppos, 0.0]);
+		  mat4.translate(TopMatrix("view"), [-viewRight, 0.0, 0.0]);
+		  mat4.translate(TopMatrix("view"), [0.0, 0.0, -viewZoom]);
+
+      if (select.id == "center")
+        {
+          viewHead = 0;
+           viewRoll = 0;
+           viewEpitch = 0;
+           viewUppos = 0;
+           viewRight = 0;
+           viewZoom = 0;
+        }
+        else if (select.id != "free")
+        {
+          //console.log(local_position[select.id])
+          
+          viewHead = 0;
+           viewRoll = 0;
+           viewEpitch = 0;
+           viewUppos = 0;
+           viewRight = 0;
+           viewZoom = -1;
+          mat4.translate(TopMatrix("view"),
+          [
+            -local_position[select.id].x,
+            -local_position[select.id].y,
+            -local_position[select.id].z
+          ]);
+        }
+        //set scene
+        mat4.identity(TopMatrix("model"));
+
+		//準備於無窮遠處畫東西
+		PushMatrix("model");
+			
+    //進行View的逆變換 (讓View變換後會變成單位矩陣)
+			//用於讓此處的local space與view space相等
+			mat4.set(TopMatrix("inverseview"), TopMatrix("model"));
+			//因為這裡local space與view space，所以Far Clipping plane很容易推算
+			mat4.scale(TopMatrix("model"), [
+               aspect * zFar * Math.tan(degToRad(fovy) * 0.5),
+               zFar * Math.tan(degToRad(fovy) * 0.5),
+           1.0]);
+		   //平移到Far Clipping plane，然後回來一格 (避免時隱時現、或看不到)
+		   mat4.translate(TopMatrix("model"), [0.0, 0.0, -zFar + 0.1]);
+
+		   gl.uniformMatrix4fv(shaderProgram.inverseViewMatrixUniform, false, TopMatrix("inverseview"));
+		   gl.uniform1b(shaderProgram.isInfinityUniform, true);
+		   gl.uniform3fv(shaderProgram.comeraPositionUniform, camera_position);
+
+
+		   gl.bindBuffer(gl.ARRAY_BUFFER, cubeVertexPositionBuffer);
+      	   gl.vertexAttribPointer(shaderProgram.vertexPositionAttribute, cubeVertexPositionBuffer.itemSize, gl.FLOAT, false, 0, 0);
+
+      	   gl.bindBuffer(gl.ARRAY_BUFFER, cubeVertexTextureCoordBuffer);
+      	   gl.vertexAttribPointer(shaderProgram.textureCoordAttribute, cubeVertexTextureCoordBuffer.itemSize, gl.FLOAT, false, 0, 0);
+
+
+      	   gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, cubeVertexIndexBuffer);
+
+      	   setMatrixUniforms();
+		   		         gl.activeTexture(gl.TEXTURE0);    //載入1號畫框
+				gl.bindTexture(gl.TEXTURE_2D, null);
+			 gl.uniform1i(shaderProgram.samplerUniform, 0);
+
+		         gl.activeTexture(gl.TEXTURE1);    //載入1號畫框
+				gl.bindTexture(gl.TEXTURE_CUBE_MAP, ntouTexture);
+			 gl.uniform1i(shaderProgram.samplerCubeUniform, 1);
+
+		   gl.drawElements(gl.TRIANGLES, 6, gl.UNSIGNED_SHORT, 0);
+		   gl.uniform1b(shaderProgram.isInfinityUniform, false);
+	  	PopMatrix("model");
+        //--------------------------
+        
+        PushMatrix("model");
+        
+	   //-------------------畫火星
+     PushMatrix("model");
+	    mat4.rotate(TopMatrix("model"), degToRad(1.1*-rCube), [0, 1, 0]);
+      mat4.translate(TopMatrix("model"), [8.0, 0.0, 4.0]);
+      mat4.rotate(TopMatrix("model"), degToRad(-rCube), [0, 1, 0]);
+      local_position["mars"] = save_coord(TopMatrix("model"));
+	    gl.bindBuffer(gl.ARRAY_BUFFER, sphereVertexPositionBuffer);
+      gl.vertexAttribPointer(shaderProgram.vertexPositionAttribute, sphereVertexPositionBuffer.itemSize, gl.FLOAT, false, 0, 0);
+      gl.bindBuffer(gl.ARRAY_BUFFER, sphereVertexColorBuffer);
+
+
+      gl.bindBuffer(gl.ARRAY_BUFFER, sphereVertexTextureCoordBuffer);
+      gl.vertexAttribPointer(shaderProgram.textureCoordAttribute, sphereVertexTextureCoordBuffer.itemSize, gl.FLOAT, false, 0, 0);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, marstexture);
+      gl.uniform1i(shaderProgram.samplerUniform, 0);
+      
+      gl.activeTexture(gl.TEXTURE1);    //載入1號畫框
+				  gl.bindTexture(gl.TEXTURE_CUBE_MAP, ntouTexture);
+			    gl.uniform1i(shaderProgram.samplerCubeUniform, 1);
+
+
+      gl.vertexAttribPointer(shaderProgram.vertexColorAttribute, sphereVertexColorBuffer.itemSize, gl.FLOAT, false, 0, 0);
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, sphereVertexIndexBuffer);
+      setMatrixUniforms();
+      gl.drawElements(gl.TRIANGLES, sphereVertexIndexBuffer.numItems, gl.UNSIGNED_SHORT, 0);
+      PopMatrix("model");
+
+  //-------------------畫地球
+	    PushMatrix("model");
+	    mat4.rotate(TopMatrix("model"), degToRad(0.5-rCube), [0, 1, 0]);
+      mat4.translate(TopMatrix("model"), [0.0, 0.0, 4.0]);
+      mat4.rotate(TopMatrix("model"), degToRad(-rCube), [0, 1, 0]);
+      local_position["earth"] = save_coord(TopMatrix("model"));
+	    gl.bindBuffer(gl.ARRAY_BUFFER, sphereVertexPositionBuffer);
+      gl.vertexAttribPointer(shaderProgram.vertexPositionAttribute, sphereVertexPositionBuffer.itemSize, gl.FLOAT, false, 0, 0);
+      gl.bindBuffer(gl.ARRAY_BUFFER, sphereVertexColorBuffer);
+
+
+      gl.bindBuffer(gl.ARRAY_BUFFER, sphereVertexTextureCoordBuffer);
+      gl.vertexAttribPointer(shaderProgram.textureCoordAttribute, sphereVertexTextureCoordBuffer.itemSize, gl.FLOAT, false, 0, 0);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, earthTexture);
+      gl.uniform1i(shaderProgram.samplerUniform, 0);
+
+      gl.activeTexture(gl.TEXTURE1);    //載入1號畫框
+				  gl.bindTexture(gl.TEXTURE_CUBE_MAP, ntouTexture);
+			    gl.uniform1i(shaderProgram.samplerCubeUniform, 1);
+
+
+
+      gl.vertexAttribPointer(shaderProgram.vertexColorAttribute, sphereVertexColorBuffer.itemSize, gl.FLOAT, false, 0, 0);
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, sphereVertexIndexBuffer);
+      setMatrixUniforms();
+      gl.drawElements(gl.TRIANGLES, sphereVertexIndexBuffer.numItems, gl.UNSIGNED_SHORT, 0);
+    //--------------------------------------
+            //-------------------------------------------
+            
+          PushMatrix("model");
+	  mat4.scale(TopMatrix("model"),[1.05,1.05,1.05]);
+    mat4.rotate(TopMatrix("model"), degToRad(-rCube), [0, 1, 0]);
+gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+gl.enable(gl.BLEND);
+
+gl.bindBuffer(gl.ARRAY_BUFFER, sphereVertexPositionBuffer);
+gl.vertexAttribPointer(shaderProgram.vertexPositionAttribute, sphereVertexPositionBuffer.itemSize, gl.FLOAT, false, 0, 0);
+gl.bindBuffer(gl.ARRAY_BUFFER, sphereVertexColorBuffer);
+
+
+gl.bindBuffer(gl.ARRAY_BUFFER, sphereVertexTextureCoordBuffer);
+gl.vertexAttribPointer(shaderProgram.textureCoordAttribute, sphereVertexTextureCoordBuffer.itemSize, gl.FLOAT, false, 0, 0);
+
+gl.activeTexture(gl.TEXTURE0);
+gl.bindTexture(gl.TEXTURE_2D, cloudTexture);
+gl.uniform1i(shaderProgram.samplerUniform, 0);
+
+
+gl.activeTexture(gl.TEXTURE1);    //載入1號畫框
+				  gl.bindTexture(gl.TEXTURE_CUBE_MAP, ntouTexture);
+			    gl.uniform1i(shaderProgram.samplerCubeUniform, 1);
+
+
+
+gl.vertexAttribPointer(shaderProgram.vertexColorAttribute, sphereVertexColorBuffer.itemSize, gl.FLOAT, false, 0, 0);
+gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, sphereVertexIndexBuffer);
+setMatrixUniforms();
+gl.drawElements(gl.TRIANGLES, sphereVertexIndexBuffer.numItems, gl.UNSIGNED_SHORT, 0);
+
+gl.disable(gl.BLEND);
+PopMatrix("model");
+//------------
+
+    
+
+
+
+	  //----------------------------畫月球
+	    PushMatrix("model");
+	  mat4.rotate(TopMatrix("model"), degToRad(-rCube), [0, 1, 0]);
+      mat4.translate(TopMatrix("model"), [0.0, 0.0, 4.0]);
+	  mat4.scale(TopMatrix("model"),[0.5,0.5,0.5]);
+    local_position["moon"] = save_coord(TopMatrix("model"));
+	  gl.bindBuffer(gl.ARRAY_BUFFER, sphereVertexPositionBuffer);
+      gl.vertexAttribPointer(shaderProgram.vertexPositionAttribute, sphereVertexPositionBuffer.itemSize, gl.FLOAT, false, 0, 0);
+      gl.bindBuffer(gl.ARRAY_BUFFER, sphereVertexColorBuffer);
+      gl.vertexAttribPointer(shaderProgram.vertexColorAttribute, sphereVertexColorBuffer.itemSize, gl.FLOAT, false, 0, 0);
+
+
+      gl.bindBuffer(gl.ARRAY_BUFFER, sphereVertexTextureCoordBuffer);
+          gl.vertexAttribPointer(shaderProgram.textureCoordAttribute, sphereVertexTextureCoordBuffer.itemSize, gl.FLOAT, false, 0, 0);
+
+          gl.activeTexture(gl.TEXTURE0);
+          gl.bindTexture(gl.TEXTURE_2D, moonTexture);
+          gl.uniform1i(shaderProgram.samplerUniform, 0);
+
+
+          gl.activeTexture(gl.TEXTURE1);    //載入1號畫框
+				  gl.bindTexture(gl.TEXTURE_CUBE_MAP, ntouTexture);
+			    gl.uniform1i(shaderProgram.samplerCubeUniform, 1);
+
+
+
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, sphereVertexIndexBuffer);
+      setMatrixUniforms();
+      gl.drawElements(gl.TRIANGLES, sphereVertexIndexBuffer.numItems, gl.UNSIGNED_SHORT, 0);
+	  PopMatrix("model");
+
+
+
+	  PopMatrix("model"); 
+	  //---------------------------畫太陽
+	  mat4.translate(TopMatrix("model"), [-1.5, 2.0, 0.0]);
+	  mat4.scale(TopMatrix("model"), [0.5, 0.5, 0.5]);
+	  mat4.rotate(TopMatrix("model"), degToRad(-rCube), [0, 1, 0]);
+    local_position["sun"] = save_coord(TopMatrix("model"));
+        gl.bindBuffer(gl.ARRAY_BUFFER, sphereVertexPositionBuffer);
+        gl.vertexAttribPointer(shaderProgram.vertexPositionAttribute, sphereVertexPositionBuffer.itemSize, gl.FLOAT, false, 0, 0);
+
+        gl.bindBuffer(gl.ARRAY_BUFFER, sphereVertexColorBuffer);
+        gl.vertexAttribPointer(shaderProgram.vertexColorAttribute, sphereVertexColorBuffer.itemSize, gl.FLOAT, false, 0, 0);
+		
+		
+		gl.bindBuffer(gl.ARRAY_BUFFER, sphereVertexTextureCoordBuffer);
+          gl.vertexAttribPointer(shaderProgram.textureCoordAttribute, sphereVertexTextureCoordBuffer.itemSize, gl.FLOAT, false, 0, 0);
+
+          gl.activeTexture(gl.TEXTURE0);
+          gl.bindTexture(gl.TEXTURE_2D, sunTexture);
+          gl.uniform1i(shaderProgram.samplerUniform, 0);
+		
+		
+          gl.activeTexture(gl.TEXTURE1);    //載入1號畫框
+				  gl.bindTexture(gl.TEXTURE_CUBE_MAP, ntouTexture);
+			    gl.uniform1i(shaderProgram.samplerCubeUniform, 1);
+
+
+
+        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, sphereVertexIndexBuffer);
+        setMatrixUniforms();
+        gl.drawElements(gl.TRIANGLES, sphereVertexIndexBuffer.numItems, gl.UNSIGNED_SHORT, 0);
+    
+    PushMatrix("model");
+    //---------------------------土星
+	  mat4.translate(TopMatrix("model"), [-10.0, 0.0, 0.0]);
+	  mat4.scale(TopMatrix("model"), [0.7, 0.7, 0.7]);
+	  mat4.rotate(TopMatrix("model"), degToRad(-rCube), [0, 1, 0]);
+    local_position["saturn"] = save_coord(TopMatrix("model"));
+
+    PushMatrix("model");
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+gl.enable(gl.BLEND);
+    mat4.scale(TopMatrix("model"), [20, 0.1, 20]);
+			gl.bindBuffer(gl.ARRAY_BUFFER, ringVertexPositionBuffer);
+			gl.vertexAttribPointer(shaderProgram.vertexPositionAttribute, ringVertexPositionBuffer.itemSize, gl.FLOAT, false, 0, 0);
+
+			gl.bindBuffer(gl.ARRAY_BUFFER, ringVertexColorBuffer);
+			gl.vertexAttribPointer(shaderProgram.vertexColorAttribute, ringVertexColorBuffer.itemSize, gl.FLOAT, false, 0, 0);
+
+			gl.bindBuffer(gl.ARRAY_BUFFER, ringVertexTexcoordBuffer);
+			gl.vertexAttribPointer(shaderProgram.textureCoordAttribute, ringVertexTexcoordBuffer.itemSize, gl.FLOAT, false, 0, 0);
+
+			gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ringVertexIndexBuffer);
+
+			gl.activeTexture(gl.TEXTURE0);    //載入的圖層為0號圖層
+
+			gl.bindTexture(gl.TEXTURE_2D, ringTexture);
+			gl.uniform1i(shaderProgram.samplerUniform, 0);
+
+			setMatrixUniforms();
+			gl.drawElements(gl.TRIANGLES, ringVertexIndexBuffer.numItems, gl.UNSIGNED_SHORT, 0);
+        gl.disable(gl.BLEND);
+		PopMatrix("model");
+
+        gl.bindBuffer(gl.ARRAY_BUFFER, sphereVertexPositionBuffer);
+        gl.vertexAttribPointer(shaderProgram.vertexPositionAttribute, sphereVertexPositionBuffer.itemSize, gl.FLOAT, false, 0, 0);
+
+        gl.bindBuffer(gl.ARRAY_BUFFER, sphereVertexColorBuffer);
+        gl.vertexAttribPointer(shaderProgram.vertexColorAttribute, sphereVertexColorBuffer.itemSize, gl.FLOAT, false, 0, 0);
+		
+		
+		    gl.bindBuffer(gl.ARRAY_BUFFER, sphereVertexTextureCoordBuffer);
+          gl.vertexAttribPointer(shaderProgram.textureCoordAttribute, sphereVertexTextureCoordBuffer.itemSize, gl.FLOAT, false, 0, 0);
+
+          gl.activeTexture(gl.TEXTURE0);
+          gl.bindTexture(gl.TEXTURE_2D, saturnTexture);
+          gl.uniform1i(shaderProgram.samplerUniform, 0);
+		
+		
+          gl.activeTexture(gl.TEXTURE1);    //載入1號畫框
+				  gl.bindTexture(gl.TEXTURE_CUBE_MAP, ntouTexture);
+			    gl.uniform1i(shaderProgram.samplerCubeUniform, 1);
+
+
+
+        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, sphereVertexIndexBuffer);
+        setMatrixUniforms();
+        gl.drawElements(gl.TRIANGLES, sphereVertexIndexBuffer.numItems, gl.UNSIGNED_SHORT, 0);
+
+    PopMatrix("model");
+		PopMatrix("model");
+	  
+        
+        
+
+
+      }
+
+      var local_position = {}
+      function save_coord(matrix){
+        var result={x:matrix[12],y:matrix[13],z:matrix[14],inv:mat4.create()}
+        return result;
+      }
+
+      var select = document.getElementById("free");
+      var lastTime = 0;
+
+      function animate() {
+        var timeNow = new Date().getTime();
+        if (lastTime != 0) {
+          var elapsed = timeNow - lastTime;
+
+          xRot += (90 * elapsed) / 1000.0;
+          yRot += (90 * elapsed) / 1000.0;
+          zRot += (90 * elapsed) / 1000.0;
+          rCube -= (75 * elapsed) / 1000.0;
+        }
+        lastTime = timeNow;
+      }
+
+      function tick() {
+        requestAnimFrame(tick);
+		handleKeys();
+        drawScene();
+        animate();
+
+      }
+
+      var cbs = document.querySelectorAll('input[type="checkbox"]');
+      function webGLStart() {
+        var canvas = document.getElementById("lesson08-canvas");
+        initGL(canvas);
+        initShaders();
+        initBuffers();
+        initTexture();
+        cbs = document.querySelectorAll('input[type="checkbox"]');
+        gl.clearColor(0.0, 0.0, 0.0, 1.0);
+        gl.enable(gl.DEPTH_TEST);
+        select = document.getElementById("free");
+		document.onkeydown = handleKeyDown;   //按鍵壓下
+        document.onkeyup = handleKeyUp;   //放開此按鍵
+
+        tick();
+      }
+    </script>
+  </head>
+
+
+  <body onload="webGLStart();">
+    <h2>WebGL Lesson 9 HW 8</h2>
+    <canvas id="lesson08-canvas" style="border: none;" width="500px" height="500px" ></canvas>
+    <br/>
+    <input type="checkbox" class="planet" id="free" onclick="jsMethod(this);" checked/>自由 ;
+    <input type="checkbox" class="planet" id="center" onclick="jsMethod(this);" />原點；
+    <input type="checkbox" class="planet" id="earth" onclick="jsMethod(this);" />地球 ;
+    <input type="checkbox" class="planet" id="moon" onclick="jsMethod(this);" />月球；
+    <input type="checkbox" class="planet" id="sun" onclick="jsMethod(this);" />太陽；
+    <input type="checkbox" class="planet" id="saturn" onclick="jsMethod(this);" />土星；
+    <input type="checkbox" class="planet" id="mars" onclick="jsMethod(this);" />火星；
+    <script>
+      function jsMethod(inputtag) {
+          switchCamera = true;
+          var idAttr = inputtag.id;
+          var flag = false
+          if (inputtag.checked)
+          {
+            select = document.getElementById(idAttr);
+          }
+          else
+          {
+            select = document.getElementById("free");
+            flag = true;
+          }
+
+          for(var i=0; i < cbs.length; i++)
+          {
+            if (cbs[i].id != idAttr)
+            {
+              cbs[i].checked = false;
+            }
+            if (flag && cbs[i].id == "free")
+            {
+              cbs[i].checked = true;
+            }
+          }
+      }
+    </script>
+    
+  </body>
+
+</html>
